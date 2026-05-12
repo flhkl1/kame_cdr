@@ -16,12 +16,12 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict
 
 import aiohttp
 import numpy as np
-import sentencepiece
-import sphn
+import sentencepiece  # type: ignore[import-untyped]
+import sphn  # type: ignore[import-untyped]
 import torch
 from aiohttp import web
 from google.cloud import speech
@@ -75,6 +75,7 @@ def clear_session_logs() -> None:
             fpath.unlink()
     log("info", f"Cleared session log files in {save_dir}")
 
+
 def add_to_conversation(speaker: str, text: str, flush_file: bool = True):
     """Append text to the conversation in a thread-safe way."""
     global conversation_text, current_speaker
@@ -83,27 +84,29 @@ def add_to_conversation(speaker: str, text: str, flush_file: bool = True):
         return
     with conversation_lock:
         if speaker != current_speaker:
-            if conversation_text and not conversation_text.endswith('\n'):
-                conversation_text += '\n'
+            if conversation_text and not conversation_text.endswith("\n"):
+                conversation_text += "\n"
             conversation_text += f"{speaker}: "
             current_speaker = speaker
         conversation_text += f"{text} "
         if flush_file and save_dir is not None:
             (save_dir / "conversation.txt").write_text(conversation_text, encoding="utf-8")
 
+
 def get_conversation_snapshot() -> str:
     with conversation_lock:
         return conversation_text
 
-def get_last_speaker(conversation_snapshot: str) -> str:
-    lines = conversation_snapshot.strip().split('\n')
+
+def get_last_speaker(conversation_snapshot: str) -> str | None:
+    lines = conversation_snapshot.strip().split("\n")
 
     for line in reversed(lines):
         line = line.strip()
-        if line and ':' in line:
-            speaker = line.split(':', 1)[0].strip()
+        if line and ":" in line:
+            speaker = line.split(":", 1)[0].strip()
             return speaker
-    
+
     return None
 
 
@@ -123,9 +126,9 @@ def seed_all(seed):
 # -----------------------
 class AsyncASRProcessor:
     """Google Cloud Speech streaming with partial commits (no external final).
-       - Monotonic commit-pointer per utterance to avoid duplicates on backtrack.
-       - Short-term dedupe across final boundaries (TTL ~1.2s).
-       - Logs each committed word to asr_words.txt with timestamp.
+    - Monotonic commit-pointer per utterance to avoid duplicates on backtrack.
+    - Short-term dedupe across final boundaries (TTL ~1.2s).
+    - Logs each committed word to asr_words.txt with timestamp.
     """
 
     def __init__(self, sample_rate=24000):
@@ -136,12 +139,7 @@ class AsyncASRProcessor:
         self.running = False
         self.asr_task: asyncio.Task | None = None
 
-        self.stats = {
-            'words_detected': 0,
-            'final_transcripts': 0,
-            'buffer_drops': 0,
-            'reconnections': 0
-        }
+        self.stats = {"words_detected": 0, "final_transcripts": 0, "buffer_drops": 0, "reconnections": 0}
 
         self.asr_enabled = False
         self.init_error: str | None = None
@@ -157,8 +155,8 @@ class AsyncASRProcessor:
         self._dedupe_ttl_sec = 1.2
 
         # nudgers
-        self._nudge_partial = None   # def (full_text: str) -> None
-        self._nudge_force = None     # def () -> None
+        self._nudge_partial = None  # def (full_text: str) -> None
+        self._nudge_force = None  # def () -> None
 
         self._initialize_speech_client()
 
@@ -226,6 +224,7 @@ class AsyncASRProcessor:
         if not self.asr_enabled or not self.running:
             return
         try:
+            pcm_16bit: np.ndarray
             if isinstance(pcm_data, np.ndarray):
                 if pcm_data.dtype == np.float32:
                     pcm_data = np.clip(pcm_data, -1.0, 1.0)
@@ -233,25 +232,25 @@ class AsyncASRProcessor:
                 else:
                     pcm_16bit = pcm_data.astype(np.int16)
             else:
-                pcm_float = pcm_data.numpy() if hasattr(pcm_data, 'numpy') else np.asarray(pcm_data, dtype=np.float32)
+                pcm_float = pcm_data.numpy() if hasattr(pcm_data, "numpy") else np.asarray(pcm_data, dtype=np.float32)
                 pcm_float = np.clip(pcm_float, -1.0, 1.0)
                 pcm_16bit = (pcm_float * 32767).astype(np.int16)
 
             # naive resample to 16k
             if self.sample_rate == 24000:
-                idx = np.arange(0, len(pcm_16bit), 1.5).astype(int)
-                pcm_16k = pcm_16bit[idx[:min(len(idx), len(pcm_16bit))]]
+                idx: np.ndarray = np.arange(0, len(pcm_16bit), 1.5).astype(int)
+                pcm_16k = pcm_16bit[idx[: min(len(idx), len(pcm_16bit))]]
             elif self.sample_rate == 16000:
                 pcm_16k = pcm_16bit
             else:
                 ratio = self.target_sample_rate / float(self.sample_rate)
-                idx = np.arange(0, len(pcm_16bit), 1/ratio).astype(int)
-                pcm_16k = pcm_16bit[idx[:min(len(idx), len(pcm_16bit))]]
+                idx = np.arange(0, len(pcm_16bit), 1 / ratio).astype(int)
+                pcm_16k = pcm_16bit[idx[: min(len(idx), len(pcm_16bit))]]
 
             try:
                 self.audio_buffer.put(pcm_16k.tobytes(), block=False)
             except queue.Full:
-                self.stats['buffer_drops'] += 1
+                self.stats["buffer_drops"] += 1
                 try:
                     _ = self.audio_buffer.get_nowait()
                     self.audio_buffer.put(pcm_16k.tobytes(), block=False)
@@ -274,7 +273,7 @@ class AsyncASRProcessor:
             except Exception as e:
                 if self.running:
                     retry_count += 1
-                    self.stats['reconnections'] += 1
+                    self.stats["reconnections"] += 1
                     log("error", f"ASR streaming error (retry {retry_count}/{max_retries}): {e}")
                     if retry_count >= max_retries:
                         log("warning", "Max retries reached, waiting before reset...")
@@ -304,7 +303,7 @@ class AsyncASRProcessor:
                 except queue.Empty:
                     if time.time() - last_data_time > 5.0:
                         # keep stream alive with short silence
-                        yield b'\x00' * 160
+                        yield b"\x00" * 160
                         last_data_time = time.time()
                     continue
 
@@ -331,8 +330,7 @@ class AsyncASRProcessor:
                 if chunks:
                     yield b"".join(chunks)
 
-        requests = (speech.StreamingRecognizeRequest(audio_content=content)
-                    for content in audio_generator())
+        requests = (speech.StreamingRecognizeRequest(audio_content=content) for content in audio_generator())
         responses = self.speech_client.streaming_recognize(self.streaming_config, requests)
         self._process_responses(responses)
 
@@ -372,16 +370,16 @@ class AsyncASRProcessor:
                 tokens = transcript.split()
 
                 # growth beyond committed pointer
-                first_commit = (self._committed_len == 0)
+                first_commit = self._committed_len == 0
                 if len(tokens) > self._committed_len:
-                    new_tokens = tokens[self._committed_len:]
+                    new_tokens = tokens[self._committed_len :]
                     # short-term dedupe (across result boundaries)
                     commit_tokens = self._filter_dedupe(new_tokens)
 
                     if commit_tokens:
                         add_to_conversation("user", " ".join(commit_tokens), flush_file=True)
                         for w in commit_tokens:
-                            self.stats['words_detected'] += 1
+                            self.stats["words_detected"] += 1
                             ts = int(time.time() * 1000)
                             log("info", f"[ASR Word] {w}")
                             append_session_log("asr_words.txt", f"{ts}: {w}\n")
@@ -404,7 +402,7 @@ class AsyncASRProcessor:
 
                 if result.is_final:
                     self._committed_len = 0
-                    self.stats['final_transcripts'] += 1
+                    self.stats["final_transcripts"] += 1
 
 
 # -----------------------
@@ -437,10 +435,10 @@ class LLMStreamMultiplexer:
         server_state,
         system_prompt: str = "",
         *,
-        min_chars_delta: int = 1,      # unused (kept for API compatibility)
-        min_words_delta: int = 1,      # unused (kept for API compatibility)
+        min_chars_delta: int = 1,  # unused (kept for API compatibility)
+        min_words_delta: int = 1,  # unused (kept for API compatibility)
         min_restart_interval: float = 0.4,
-        debounce_seconds: float = 0.0, # unused (kept for API compatibility)
+        debounce_seconds: float = 0.0,  # unused (kept for API compatibility)
         max_restarts_per_2s: int = 0,  # unused (kept for API compatibility)
         max_prompt_chars: int = 6000,
         max_concurrent_streams: int = 20,
@@ -465,7 +463,7 @@ class LLMStreamMultiplexer:
 
         # generation bookkeeping
         self._gen_counter = 0
-        self._tasks: dict[int, asyncio.Task] = {}   # gen_id -> task
+        self._tasks: dict[int, asyncio.Task] = {}  # gen_id -> task
 
         # Emission-based adoption:
         # - adopted_gen: only this gen's chunks are forwarded to the writer
@@ -487,25 +485,23 @@ class LLMStreamMultiplexer:
     # called from any thread / callback
     def on_interim_pending(self, _full_text: str):
         """No debounce, no delta gating. Just try to start at fixed cadence."""
-        if not self.loop:
+        loop = self.loop
+        if not loop:
             return
-        self.loop.call_soon_threadsafe(
-            lambda: self.loop.create_task(self._maybe_start_new_stream(force=False))
-        )
+        loop.call_soon_threadsafe(lambda: loop.create_task(self._maybe_start_new_stream(force=False)))
 
     # called on first commit within an utterance
     def nudge_now(self, force: bool = True):
         """Force-start immediately (bypasses the cadence guard)."""
-        if not self.loop:
+        loop = self.loop
+        if not loop:
             return
-        self.loop.call_soon_threadsafe(
-            lambda: self.loop.create_task(self._maybe_start_new_stream(force=force))
-        )
+        loop.call_soon_threadsafe(lambda: loop.create_task(self._maybe_start_new_stream(force=force)))
 
     def _trim_prompt(self, text: str) -> str:
         if len(text) <= self.max_prompt_chars:
             return text
-        return text[-self.max_prompt_chars:]
+        return text[-self.max_prompt_chars :]
 
     def _build_messages(self, committed_conversation: str):
         convo = committed_conversation.rstrip()
@@ -608,7 +604,8 @@ class LLMStreamMultiplexer:
 
         # Prefer newest "warm standbys" that have NOT emitted yet
         not_emitting_newest = [
-            gid for gid, _ in sorted(live, key=lambda x: x[0], reverse=True)
+            gid
+            for gid, _ in sorted(live, key=lambda x: x[0], reverse=True)
             if self._first_emit_ts.get(gid, 0.0) == 0.0 and gid != self.adopted_gen
         ]
 
@@ -700,8 +697,17 @@ class ServerState:
     lock: asyncio.Lock
     asr_processor: AsyncASRProcessor | None = None
 
-    def __init__(self, model_type: str, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
-                 lm: LMModel, cfg_coef: float, device: str | torch.device, enable_asr: bool = True, **kwargs):
+    def __init__(
+        self,
+        model_type: str,
+        mimi: MimiModel,
+        text_tokenizer: sentencepiece.SentencePieceProcessor,
+        lm: LMModel,
+        cfg_coef: float,
+        device: str | torch.device,
+        enable_asr: bool = True,
+        **kwargs,
+    ):
         self.model_type = model_type
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
@@ -770,7 +776,7 @@ Since the output will be spoken, avoid symbols not needed for pronunciation (e.g
             chunk = torch.zeros(1, 1, self.frame_size, dtype=torch.float32, device=self.device)
             codes = self.mimi.encode(chunk)
             for c in range(codes.shape[-1]):
-                tokens = self.lm_gen.step(codes[:, :, c: c + 1])
+                tokens = self.lm_gen.step(codes[:, :, c : c + 1])
                 if tokens is None:
                     continue
                 _ = self.mimi.decode(tokens[:, 1:])
@@ -779,7 +785,7 @@ Since the output will be spoken, avoid symbols not needed for pronunciation (e.g
             torch.cuda.synchronize(device=resolved_device)
 
     def __del__(self):
-        if hasattr(self, 'asr_processor') and self.asr_processor:
+        if hasattr(self, "asr_processor") and self.asr_processor:
             self.asr_processor.running = False
 
     async def handle_chat(self, request):
@@ -865,7 +871,7 @@ Since the output will be spoken, avoid symbols not needed for pronunciation (e.g
 
                 while all_pcm_data.shape[-1] >= self.frame_size:
                     chunk = all_pcm_data[: self.frame_size]
-                    all_pcm_data = all_pcm_data[self.frame_size:]
+                    all_pcm_data = all_pcm_data[self.frame_size :]
 
                     # feed ASR with the incoming mic chunk
                     if self.asr_processor:
@@ -878,7 +884,7 @@ Since the output will be spoken, avoid symbols not needed for pronunciation (e.g
                         self.mimi.reset_streaming()
                         skip_frames -= 1
                     for c in range(codes.shape[-1]):
-                        tokens = self.lm_gen.step(codes[:, :, c: c + 1])
+                        tokens = self.lm_gen.step(codes[:, :, c : c + 1])
                         if tokens is None:
                             continue
                         assert tokens.shape[1] == self.lm_gen.lm_model.dep_q + 1
@@ -947,27 +953,49 @@ def main():
     parser.add_argument("--host", default="localhost", type=str)
     parser.add_argument("--port", default=8998, type=int)
     parser.add_argument("--static", type=str)
-    parser.add_argument("--gradio-tunnel", action='store_true', help='Activate a gradio tunnel.')
-    parser.add_argument("--gradio-tunnel-token",
-                        help='Provide a custom (secret) token here to keep getting the same URL.')
+    parser.add_argument("--gradio-tunnel", action="store_true", help="Activate a gradio tunnel.")
+    parser.add_argument(
+        "--gradio-tunnel-token", help="Provide a custom (secret) token here to keep getting the same URL."
+    )
     parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
     parser.add_argument("--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi.")
     parser.add_argument("--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi.")
-    parser.add_argument("--hf-repo", type=str, default=loaders.DEFAULT_REPO,
-                        help="HF repo to look into, defaults Moshiko.")
+    parser.add_argument(
+        "--hf-repo", type=str, default=loaders.DEFAULT_REPO, help="HF repo to look into, defaults Moshiko."
+    )
     parser.add_argument("--lora-weight", type=str, help="Path to a local checkpoint file for LoRA.", default=None)
     parser.add_argument("--config-path", type=str, help="Path to a local config file.", default=None)
-    parser.add_argument("--cfg-coef", type=float, default=1., help="CFG coefficient.")
+    parser.add_argument("--cfg-coef", type=float, default=1.0, help="CFG coefficient.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
-    parser.add_argument("--no_fuse_lora", action="store_false", dest="fuse_lora", default=True,
-                        help="Do not fuse LoRA layers into Linear layers.")
-    parser.add_argument("--half", action="store_const", const=torch.float16, default=torch.bfloat16,
-                        dest="dtype", help="Run inference with float16, not bfloat16.")
-    parser.add_argument("--enable-asr", action=argparse.BooleanOptionalAction, default=True,
-                        help="Enable ASR processing for transcription (default: True)")
-    parser.add_argument("--ssl", type=str,
-        help=("use https instead of http, this flag should point to a directory "
-              "that contains valid key.pem and cert.pem files"))
+    parser.add_argument(
+        "--no_fuse_lora",
+        action="store_false",
+        dest="fuse_lora",
+        default=True,
+        help="Do not fuse LoRA layers into Linear layers.",
+    )
+    parser.add_argument(
+        "--half",
+        action="store_const",
+        const=torch.float16,
+        default=torch.bfloat16,
+        dest="dtype",
+        help="Run inference with float16, not bfloat16.",
+    )
+    parser.add_argument(
+        "--enable-asr",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable ASR processing for transcription (default: True)",
+    )
+    parser.add_argument(
+        "--ssl",
+        type=str,
+        help=(
+            "use https instead of http, this flag should point to a directory "
+            "that contains valid key.pem and cert.pem files"
+        ),
+    )
     parser.add_argument(
         "--log-dir",
         type=str,
@@ -982,21 +1010,28 @@ def main():
     configure_save_dir(args.log_dir or os.environ.get("MOSHI_LOG_DIR"))
 
     setup_tunnel = None
-    tunnel_token = ''
+    tunnel_token = ""
     if args.gradio_tunnel:
         try:
             from gradio import networking  # type: ignore
         except ImportError:
-            log("error", "Cannot find gradio which is required to activate a tunnel. "
-                         "Please install with pip install gradio.")
+            log(
+                "error",
+                "Cannot find gradio which is required to activate a tunnel. Please install with pip install gradio.",
+            )
             sys.exit(1)
         setup_tunnel = networking.setup_tunnel
         tunnel_token = args.gradio_tunnel_token or secrets.token_urlsafe(32)
 
     log("info", "retrieving checkpoint")
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
-        args.hf_repo, args.moshi_weight, args.mimi_weight, args.tokenizer,
-        lora_weights=args.lora_weight, config_path=args.config_path)
+        args.hf_repo,
+        args.moshi_weight,
+        args.mimi_weight,
+        args.tokenizer,
+        lora_weights=args.lora_weight,
+        config_path=args.config_path,
+    )
     log("info", "loading mimi")
     mimi = checkpoint_info.get_mimi(device=args.device)
     log("info", "mimi loaded")
@@ -1007,8 +1042,16 @@ def main():
     lm = checkpoint_info.get_moshi(device=args.device, dtype=args.dtype, fuse_lora=args.fuse_lora)
     log("info", "moshi loaded")
 
-    state = ServerState(checkpoint_info.model_type, mimi, text_tokenizer, lm, args.cfg_coef, args.device,
-                        enable_asr=args.enable_asr, **checkpoint_info.lm_gen_config)
+    state = ServerState(
+        checkpoint_info.model_type,
+        mimi,
+        text_tokenizer,
+        lm,
+        args.cfg_coef,
+        args.device,
+        enable_asr=args.enable_asr,
+        **checkpoint_info.lm_gen_config,
+    )
     log("info", "warming up the model")
     state.warmup()
 
@@ -1029,8 +1072,10 @@ def main():
         static_path = args.static
 
     if static_path is not None:
+
         async def handle_root(_):
             return web.FileResponse(os.path.join(static_path, "index.html"))
+
         log("info", f"serving static content from {static_path}")
         app.router.add_get("/", handle_root)
         app.router.add_static("/", path=static_path, follow_symlinks=True, name="static")
@@ -1039,6 +1084,7 @@ def main():
     ssl_context = None
     if args.ssl is not None:
         import ssl
+
         ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         cert_file = os.path.join(args.ssl, "cert.pem")
         key_file = os.path.join(args.ssl, "key.pem")
@@ -1052,7 +1098,7 @@ def main():
         tunnel_kwargs = {}
         if "share_server_tls_certificate" in inspect.signature(setup_tunnel).parameters:
             tunnel_kwargs["share_server_tls_certificate"] = None
-        tunnel = setup_tunnel('localhost', args.port, tunnel_token, None, **tunnel_kwargs)
+        tunnel = setup_tunnel("localhost", args.port, tunnel_token, None, **tunnel_kwargs)
         log("info", f"Tunnel started, if executing on a remote GPU, you can use {tunnel}.")
         log("info", "Note that this tunnel goes through the US and you might experience high latency in Europe.")
     web.run_app(app, host=args.host, port=args.port, ssl_context=ssl_context)
