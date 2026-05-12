@@ -16,8 +16,6 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict
-
 import aiohttp
 import numpy as np
 import sentencepiece  # type: ignore[import-untyped]
@@ -470,8 +468,8 @@ class LLMStreamMultiplexer:
         # - _first_emit_ts: first token time per gen (0.0/absent => not yet emitted)
         # - _start_ts: start time per gen (for TTFT logging / debugging)
         self.adopted_gen: int = 0
-        self._first_emit_ts: Dict[int, float] = {}
-        self._start_ts: Dict[int, float] = {}
+        self._first_emit_ts: dict[int, float] = {}
+        self._start_ts: dict[int, float] = {}
 
         # Backward-compat shadow of "latest" (equals adopted_gen after adoption)
         self._latest_gen: int = 0
