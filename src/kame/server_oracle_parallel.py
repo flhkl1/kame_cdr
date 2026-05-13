@@ -404,7 +404,7 @@ class AsyncASRProcessor:
 
 
 # -----------------------
-# LLM Stream (single active, preemptive cancel)
+# LLM Stream (parallel starts, single adopted stream)
 # -----------------------
 class LLMStreamMultiplexer:
     """
@@ -519,8 +519,8 @@ class LLMStreamMultiplexer:
             return
 
         committed = get_conversation_snapshot()
-        last_spreaker = get_last_speaker(committed)
-        if last_spreaker != "user":
+        last_speaker = get_last_speaker(committed)
+        if last_speaker != "user":
             return
         await self._start_stream(committed)
 
@@ -622,7 +622,6 @@ class LLMStreamMultiplexer:
                 self._tasks.pop(gid, None)
 
     async def _stream_single(self, messages, gen_id: int):
-        global save_dir
         try:
             stream = await self.client.chat.completions.create(
                 model="gpt-4.1",
@@ -704,6 +703,8 @@ class ServerState:
         cfg_coef: float,
         device: str | torch.device,
         enable_asr: bool = True,
+        min_restart_interval: float = 0.50,
+        max_concurrent_streams: int = 7,
         **kwargs,
     ):
         self.model_type = model_type
@@ -726,7 +727,7 @@ class ServerState:
         self.asr_processor = AsyncASRProcessor(sample_rate=int(self.mimi.sample_rate)) if enable_asr else None
         self._require_initialized_asr(enable_asr)
 
-        # Multiplexer (single active stream)
+        # Multiplexer (parallel streams, single adopted stream)
         self.llm_mux = LLMStreamMultiplexer(
             server_state=self,
             system_prompt="""
@@ -738,9 +739,9 @@ Your answer must be short and concise, max 30 words. Do not prefix with moshi:.
 Provide correct information consistent with the User's statements.
 Since the output will be spoken, avoid symbols not needed for pronunciation (e.g., " ー ;).
 """.strip(),
-            min_restart_interval=0.50,
+            min_restart_interval=min_restart_interval,
             max_prompt_chars=6000,
-            max_concurrent_streams=7,
+            max_concurrent_streams=max_concurrent_streams,
         )
 
         self.loop: asyncio.AbstractEventLoop | None = None
@@ -988,6 +989,18 @@ def main():
         help="Enable ASR processing for transcription (default: True)",
     )
     parser.add_argument(
+        "--min-restart-interval",
+        type=float,
+        default=0.50,
+        help="Minimum interval in seconds between parallel LLM stream starts.",
+    )
+    parser.add_argument(
+        "--max-concurrent-streams",
+        type=int,
+        default=5,
+        help="Maximum number of concurrent parallel LLM streams.",
+    )
+    parser.add_argument(
         "--ssl",
         type=str,
         help=(
@@ -1049,6 +1062,8 @@ def main():
         args.cfg_coef,
         args.device,
         enable_asr=args.enable_asr,
+        min_restart_interval=args.min_restart_interval,
+        max_concurrent_streams=args.max_concurrent_streams,
         **checkpoint_info.lm_gen_config,
     )
     log("info", "warming up the model")
