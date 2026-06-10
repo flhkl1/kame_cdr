@@ -817,7 +817,10 @@ Since the output will be spoken, avoid symbols not needed for pronunciation (e.g
                     kind = data[0]
                     if kind == 1:  # audio
                         payload = data[1:]
-                        opus_reader.append_bytes(payload)
+                        try:
+                            opus_reader.append_bytes(payload)
+                        except ValueError:
+                            break
                     else:
                         log("warning", f"unknown message kind {kind}")
             finally:
