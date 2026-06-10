@@ -857,7 +857,7 @@ Since the output will be spoken, avoid symbols not needed for pronunciation (e.g
 
                 # 2) audio pipeline
                 pcm = opus_reader.read_pcm()
-                if pcm.shape[-1] == 0:
+                if pcm is None or pcm.shape[-1] == 0:
                     continue
                 if all_pcm_data is None:
                     all_pcm_data = pcm
