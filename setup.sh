@@ -49,16 +49,15 @@ log "Python dependencies done."
 # Fix PYTHONPATH so kame package is found (src layout)
 export PYTHONPATH=/workspace/kame/src:$PYTHONPATH
 
-log "Setup complete. Starting KAME server..."
-log "Gradio tunnel URL will appear below — share that link to access the UI."
+log "Setup complete. Starting KAME server on port 8998..."
+log "Access via RunPod proxy: https://<pod-id>-8998.proxy.runpod.net"
 
 # Start KAME oracle server
 # --hf-repo: downloads model weights from SakanaAI/kame on HuggingFace (not gated)
 # --host 0.0.0.0: listen on all interfaces so RunPod can route traffic
-# --gradio-tunnel: creates a public gradio.live URL
+# No --gradio-tunnel: use the stable RunPod proxy URL instead
 python3 -m kame.server_oracle_parallel \
     --hf-repo SakanaAI/kame \
     --host 0.0.0.0 \
     --port 8998 \
-    --device cuda \
-    --gradio-tunnel
+    --device cuda
