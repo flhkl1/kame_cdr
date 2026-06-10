@@ -911,14 +911,18 @@ Since the output will be spoken, avoid symbols not needed for pronunciation (e.g
                     await ws.send_bytes(b"\x01" + msg)
 
         log("info", "accepted connection")
+        log("info", f"[setup] lock locked={self.lock.locked()}")
         async with self.lock:
+            log("info", "[setup] lock acquired")
             with conversation_lock:
                 conversation_text = ""
                 current_speaker = None
             clear_session_logs()
             append_session_log("conversation.txt", "")
 
+            log("info", "[setup] stopping llm_mux")
             await self.llm_mux.stop()
+            log("info", "[setup] llm_mux stopped")
             try:
                 while True:
                     self.llm_event_queue.get_nowait()
@@ -929,14 +933,19 @@ Since the output will be spoken, avoid symbols not needed for pronunciation (e.g
             self.llm_mux.set_loop(self.loop)
 
             if self.asr_processor:
+                log("info", "[setup] starting asr")
                 self.asr_processor.set_llm_nudgers(self._llm_nudge_partial, self._llm_nudge_force)
                 await self.asr_processor.start()
+                log("info", "[setup] asr started")
 
+            log("info", "[setup] resetting moshi")
             opus_writer = sphn.OpusStreamWriter(self.mimi.sample_rate)
             opus_reader = sphn.OpusStreamReader(self.mimi.sample_rate)
             self.mimi.reset_streaming()
             self.lm_gen.reset_streaming()
+            log("info", "[setup] sending handshake")
             await ws.send_bytes(b"\x00")  # handshake
+            log("info", "[setup] handshake sent — session active")
             await asyncio.gather(opus_loop(), recv_loop(), send_loop())
 
         # Cleanup
