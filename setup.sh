@@ -11,7 +11,7 @@ cd /workspace
 # Clone repo if not already present
 if [ ! -d "kame" ]; then
     log "Cloning KAME repo..."
-    git clone https://github.com/SakanaAI/kame.git
+    git clone https://github.com/flhkl1/kame_cdr.git
     log "Repo cloned."
 else
     log "Repo already present, skipping clone."
