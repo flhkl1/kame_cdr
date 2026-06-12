@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import collections
 import inspect
+import json
 import os
 import queue
 import random
@@ -821,6 +822,16 @@ Since the output will be spoken, avoid symbols not needed for pronunciation (e.g
                             opus_reader.append_bytes(payload)
                         except ValueError:
                             break
+                    elif kind == 4:  # metadata
+                        try:
+                            meta = json.loads(data[1:].decode("utf-8"))
+                        except (UnicodeDecodeError, json.JSONDecodeError):
+                            log("warning", "invalid metadata json from client")
+                            continue
+                        sp = meta.get("system_prompt")
+                        if sp is not None:
+                            self.llm_mux.system_prompt = sp
+                            log("info", f"system prompt updated ({len(sp)} chars)")
                     else:
                         log("warning", f"unknown message kind {kind}")
             finally:
