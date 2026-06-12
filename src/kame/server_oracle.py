@@ -2,6 +2,7 @@ import argparse
 import asyncio
 from dataclasses import dataclass
 import inspect
+import json
 import random
 import os
 from pathlib import Path
@@ -789,6 +790,16 @@ class ServerState:
                     if kind == 1:  # audio
                         payload = data[1:]
                         opus_reader.append_bytes(payload)
+                    elif kind == 4:  # metadata
+                        try:
+                            meta = json.loads(data[1:].decode("utf-8"))
+                        except (UnicodeDecodeError, json.JSONDecodeError):
+                            log("warning", "invalid metadata json from client")
+                            continue
+                        sp = meta.get("system_prompt")
+                        if sp is not None:
+                            self.llm_stream_manager.system_prompt = sp
+                            log("info", f"system prompt updated ({len(sp)} chars)")
                     else:
                         log("warning", f"unknown message kind {kind}")
             finally:
